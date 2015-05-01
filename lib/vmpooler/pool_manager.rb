@@ -283,6 +283,57 @@ module Vmpooler
       end
     end
 
+    # Create a VM snapshot
+    def create_vm_snapshot(vm, snapshot_name)
+      Thread.new do
+        host = $vsphere['snapshot_manager'].find_vm(vm) ||
+               $vsphere['snapshot_manager'].find_vm_heavy(vm)[vm]
+
+        if host
+          $logger.log('s', "[ ] [snapshot_manager] '#{vm}' is being snapshotted")
+
+          start = Time.now
+
+          host.CreateSnapshot_Task(
+            name: snapshot_name,
+            description: 'vmpooler',
+            memory: true,
+            quiesce: true
+          ).wait_for_completion
+
+          finish = '%.2f' % (Time.now - start)
+
+          $redis.hset('vmpooler__vm__' + vm, 'snapshot:' + snapshot_name, Time.now)
+
+          $logger.log('s', "[+] [snapshot_manager] '#{vm}' snapshot created in #{finish} seconds")
+        end
+      end
+    end
+
+    # Revert a VM to a named snapshot
+    def revert_vm_snapshot(vm, snapshot_name)
+      Thread.new do
+        host = $vsphere['snapshot_manager'].find_vm(vm) ||
+               $vsphere['snapshot_manager'].find_vm_heavy(vm)[vm]
+
+        if host
+          snapshot = $vsphere['snapshot_manager'].find_snapshot(host, snapshot_name)
+
+          if snapshot
+            $logger.log('s', "[ ] [snapshot_manager] '#{vm}' is being reverted to snapshot '#{snapshot_name}'")
+
+            start = Time.now
+
+            snapshot.RevertToSnapshot_Task.wait_for_completion
+
+            finish = '%.2f' % (Time.now - start)
+
+            $logger.log('s', "[<] [snapshot_manager] '#{vm}' reverted to snapshot in #{finish} seconds")
+          end
+        end
+      end
+    end
+
     def check_pool(pool)
       $logger.log('d', "[*] [#{pool['name']}] starting worker thread")
 
@@ -445,6 +496,40 @@ module Vmpooler
       end
     end
 
+    def check_snapshot_queue
+      $logger.log('d', "[*] [snapshot_manager] starting worker thread")
+
+      $threads['snapshot_manager'] = Thread.new do
+        $vsphere['snapshot_manager'] ||= Vmpooler::VsphereHelper.new
+
+        loop do
+          vm = $redis.spop('vmpooler__tasks__snapshot')
+
+          unless vm.nil?
+            begin
+              vm_name, snapshot_name = vm.split(':')
+              create_vm_snapshot(vm_name, snapshot_name)
+            rescue
+              $logger.log('s', "[!] [snapshot_manager] snapshot appears to have failed")
+            end
+          end
+
+          vm = $redis.spop('vmpooler__tasks__snapshot-revert')
+
+          unless vm.nil?
+            begin
+              vm_name, snapshot_name = vm.split(':')
+              revert_vm_snapshot(vm_name, snapshot_name)
+            rescue
+              $logger.log('s', "[!] [snapshot_manager] snapshot revert appears to have failed")
+            end
+          end
+
+          sleep(5)
+        end
+      end
+    end
+
     def execute!
       $logger.log('d', 'starting vmpooler')
 
@@ -452,6 +537,15 @@ module Vmpooler
       $redis.set('vmpooler__tasks__clone', 0)
 
       loop do
+        if ! $threads['snapshot_manager']
+          check_snapshot_queue
+        else
+          unless $threads['snapshot_manager'].alive?
+            $logger.log('d', "[!] [snapshot_manager] worker thread died, restarting")
+            check_snapshot_queue
+          end
+        end
+
         $config[:pools].each do |pool|
           if ! $threads[pool['name']]
             check_pool(pool)
