@@ -209,6 +209,16 @@ module Vmpooler
 
         if not token.nil? and not token.empty?
           status 200
+
+          pools.each do |pool|
+            backend.smembers('vmpooler__running__' + pool).each do |vm|
+              if backend.hget('vmpooler__vm__' + vm, 'token:token') == params[:token]
+                token['running_vms'] ||= []
+                token['running_vms'].push(vm)
+              end
+            end
+          end
+
           result = { 'ok' => true, params[:token] => token }
         else
           status 404
