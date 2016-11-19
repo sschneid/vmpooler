@@ -12,8 +12,8 @@ module Vmpooler
       # Connect to Redis
       $redis = redis
 
-      # vSphere object
-      $vsphere = {}
+      # provider object
+      $provider = {}
 
       # Our thread-tracker object
       $threads = {}
@@ -27,7 +27,7 @@ module Vmpooler
     end
 
     def _check_pending_vm(vm, pool, timeout)
-      host = $vsphere[pool].find_vm(vm)
+      host = $provider[pool].find_vm(vm)
 
       if host
         begin
@@ -94,8 +94,8 @@ module Vmpooler
 
           $redis.hset('vmpooler__vm__' + vm, 'check', Time.now)
 
-          host = $vsphere[pool].find_vm(vm) ||
-                 $vsphere[pool].find_vm_heavy(vm)[vm]
+          host = $provider[pool].find_vm(vm) ||
+                 $provider[pool].find_vm_heavy(vm)[vm]
 
           if host
             if
@@ -143,7 +143,7 @@ module Vmpooler
     end
 
     def _check_running_vm(vm, pool, ttl)
-      host = $vsphere[pool].find_vm(vm)
+      host = $provider[pool].find_vm(vm)
 
       if host
         queue_from, queue_to = 'running', 'completed'
@@ -177,7 +177,7 @@ module Vmpooler
         end
 
         if templatefolders
-          vm[vm['template']] = $vsphere[vm['template']].find_folder(templatefolders.join('/')).find(vm['template'])
+          vm[vm['template']] = $provider[vm['template']].find_folder(templatefolders.join('/')).find(vm['template'])
         else
           fail 'Please provide a full path to the template'
         end
@@ -213,14 +213,14 @@ module Vmpooler
 
         # Choose a clone target
         if target
-          $clone_target = $vsphere[vm['template']].find_least_used_host(target)
+          $clone_target = $provider[vm['template']].find_least_used_host(target)
         elsif $config[:config]['clone_target']
-          $clone_target = $vsphere[vm['template']].find_least_used_host($config[:config]['clone_target'])
+          $clone_target = $provider[vm['template']].find_least_used_host($config[:config]['clone_target'])
         end
 
         # Put the VM in the specified folder and resource pool
         relocateSpec = RbVmomi::VIM.VirtualMachineRelocateSpec(
-          datastore: $vsphere[vm['template']].find_datastore(datastore),
+          datastore: $provider[vm['template']].find_datastore(datastore),
           host: $clone_target,
           diskMoveType: :moveChildMostDiskBacking
         )
@@ -239,7 +239,7 @@ module Vmpooler
         begin
           start = Time.now
           vm[vm['template']].CloneVM_Task(
-            folder: $vsphere[vm['template']].find_folder(folder),
+            folder: $provider[vm['template']].find_folder(folder),
             name: vm['hostname'],
             spec: spec
           ).wait_for_completion
@@ -270,8 +270,8 @@ module Vmpooler
         # Auto-expire metadata key
         $redis.expire('vmpooler__vm__' + vm, ($config[:redis]['data_ttl'].to_i * 60 * 60))
 
-        host = $vsphere[pool].find_vm(vm) ||
-               $vsphere[pool].find_vm_heavy(vm)[vm]
+        host = $provider[pool].find_vm(vm) ||
+               $provider[pool].find_vm_heavy(vm)[vm]
 
         if host
           start = Time.now
@@ -301,8 +301,8 @@ module Vmpooler
     end
 
     def _create_vm_disk(vm, disk_size)
-      host = $vsphere['disk_manager'].find_vm(vm) ||
-             $vsphere['disk_manager'].find_vm_heavy(vm)[vm]
+      host = $provider['disk_manager'].find_vm(vm) ||
+             $provider['disk_manager'].find_vm_heavy(vm)[vm]
 
       if (host) && ((! disk_size.nil?) && (! disk_size.empty?) && (disk_size.to_i > 0))
         $logger.log('s', "[ ] [disk_manager] '#{vm}' is attaching a #{disk_size}gb disk")
@@ -319,7 +319,7 @@ module Vmpooler
         end
 
         if ((! datastore.nil?) && (! datastore.empty?))
-          $vsphere['disk_manager'].add_disk(host, disk_size, datastore)
+          $provider['disk_manager'].add_disk(host, disk_size, datastore)
 
           rdisks = $redis.hget('vmpooler__vm__' + vm, 'disk')
           disks = rdisks ? rdisks.split(':') : []
@@ -342,8 +342,8 @@ module Vmpooler
     end
 
     def _create_vm_snapshot(vm, snapshot_name)
-      host = $vsphere['snapshot_manager'].find_vm(vm) ||
-             $vsphere['snapshot_manager'].find_vm_heavy(vm)[vm]
+      host = $provider['snapshot_manager'].find_vm(vm) ||
+             $provider['snapshot_manager'].find_vm_heavy(vm)[vm]
 
       if (host) && ((! snapshot_name.nil?) && (! snapshot_name.empty?))
         $logger.log('s', "[ ] [snapshot_manager] '#{vm}' is being snapshotted")
@@ -372,11 +372,11 @@ module Vmpooler
     end
 
     def _revert_vm_snapshot(vm, snapshot_name)
-      host = $vsphere['snapshot_manager'].find_vm(vm) ||
-             $vsphere['snapshot_manager'].find_vm_heavy(vm)[vm]
+      host = $provider['snapshot_manager'].find_vm(vm) ||
+             $provider['snapshot_manager'].find_vm_heavy(vm)[vm]
 
       if host
-        snapshot = $vsphere['snapshot_manager'].find_snapshot(host, snapshot_name)
+        snapshot = $provider['snapshot_manager'].find_snapshot(host, snapshot_name)
 
         if snapshot
           $logger.log('s', "[ ] [snapshot_manager] '#{vm}' is being reverted to snapshot '#{snapshot_name}'")
@@ -395,7 +395,7 @@ module Vmpooler
     def check_disk_queue
       $logger.log('d', "[*] [disk_manager] starting worker thread")
 
-      $vsphere['disk_manager'] ||= Vmpooler::VsphereHelper.new
+      $provider['disk_manager'] ||= Vmpooler::VsphereHelper.new
 
       $threads['disk_manager'] = Thread.new do
         loop do
@@ -421,7 +421,7 @@ module Vmpooler
     def check_snapshot_queue
       $logger.log('d', "[*] [snapshot_manager] starting worker thread")
 
-      $vsphere['snapshot_manager'] ||= Vmpooler::VsphereHelper.new
+      $provider['snapshot_manager'] ||= Vmpooler::VsphereHelper.new
 
       $threads['snapshot_manager'] = Thread.new do
         loop do
@@ -458,7 +458,7 @@ module Vmpooler
     def check_pool(pool)
       $logger.log('d', "[*] [#{pool['name']}] starting worker thread")
 
-      $vsphere[pool['name']] ||= Vmpooler::VsphereHelper.new
+      $provider[pool['name']] ||= Vmpooler::VsphereHelper.new
 
       $threads[pool['name']] = Thread.new do
         loop do
@@ -472,7 +472,7 @@ module Vmpooler
       # INVENTORY
       inventory = {}
       begin
-        base = $vsphere[pool['name']].find_folder(pool['folder'])
+        base = $provider[pool['name']].find_folder(pool['folder'])
 
         base.childEntity.each do |vm|
           if
