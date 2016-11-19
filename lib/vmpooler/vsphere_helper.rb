@@ -6,13 +6,15 @@ module Vmpooler
     DISK_TYPE = 'thin'
     DISK_MODE = 'persistent'
 
-    def initialize(_vInfo = {})
-      config_file = File.expand_path('vmpooler.yaml')
-      vsphere = YAML.load_file(config_file)[:vsphere]
+    def initialize(config, logger, redis, metrics)
+      $config  = config
+      $logger  = logger
+      $redis   = redis
+      $metrics = metrics
 
-      @connection = RbVmomi::VIM.connect host: vsphere['server'],
-                                         user: vsphere['username'],
-                                         password: vsphere['password'],
+      @connection = RbVmomi::VIM.connect host: $config[:vsphere]['server'],
+                                         user: $config[:vsphere]['username'],
+                                         password: $config[:vsphere]['password'],
                                          insecure: true
     end
 
@@ -68,6 +70,127 @@ module Vmpooler
       vm.ReconfigVM_Task(spec: vm_config_spec).wait_for_completion
 
       true
+    end
+
+    def clone_vm(pool)
+      begin
+        @connection.serviceInstance.CurrentTime
+      rescue
+        initialize
+      end
+
+      begin
+        vm = {}
+
+        start = Time.now
+
+        # Check that the template exists
+        if pool['template'] =~ /\//
+          templatefolders = pool['template'].split('/')
+          vm['template'] = templatefolders.pop
+        end
+
+        if templatefolders
+          vm[vm['template']] = $provider[pool['name']].find_folder(templatefolders.join('/')).find(vm['template'])
+        else
+          fail 'Please provide a full path to the template'
+        end
+
+        if vm['template'].length == 0
+          fail "Unable to find template '#{pool['template']}'!"
+        end
+
+        # Generate a randomized hostname
+        o = [('a'..'z'), ('0'..'9')].map(&:to_a).flatten
+        vm['hostname'] = $config[:config]['prefix'] + o[rand(25)] + (0...14).map { o[rand(o.length)] }.join
+
+        # Add VM to Redis inventory ('pending' pool)
+        $redis.sadd('vmpooler__pending__' + pool['name'], vm['hostname'])
+        $redis.hset('vmpooler__vm__' + vm['hostname'], 'clone', Time.now)
+        $redis.hset('vmpooler__vm__' + vm['hostname'], 'template', pool['name'])
+
+        # Annotate with creation time, origin template, etc.
+        # Add extraconfig options that can be queried by vmtools
+        vm['configSpec'] = RbVmomi::VIM.VirtualMachineConfigSpec(
+          annotation: JSON.pretty_generate(
+              name: vm['hostname'],
+              created_by: $config[:provider]['username'],
+              base_template: vm['template'],
+              creation_timestamp: Time.now.utc
+          ),
+          extraConfig: [
+              { key: 'guestinfo.hostname',
+                value: vm['hostname']
+              }
+          ]
+        )
+
+        # Choose a clone target
+        if pool['target']
+          vm['clone_target'] = find_least_used_host(pool['target'])
+        elsif $config[:config]['clone_target']
+          vm['clone_target'] = find_least_used_host($config[:config]['clone_target'])
+        end
+
+        # Put the VM in the specified folder and resource pool
+        vm['relocateSpec'] = RbVmomi::VIM.VirtualMachineRelocateSpec(
+          datastore: find_datastore(pool['datastore']),
+          host: vm['clone_target'],
+          diskMoveType: :moveChildMostDiskBacking
+        )
+
+        # Create a clone spec
+        vm['spec'] = RbVmomi::VIM.VirtualMachineCloneSpec(
+          location: vm['relocateSpec'],
+          config: vm['configSpec'],
+          powerOn: true,
+          template: false
+        )
+
+        # Clone the VM
+        $logger.log('d', "[ ] [#{pool['name']}] '#{vm['hostname']}' is being cloned from '#{pool['template']}'")
+
+        begin
+          vm[vm['template']].CloneVM_Task(
+            folder: find_folder(pool['folder']),
+            name: vm['hostname'],
+            spec: vm['spec']
+          ).wait_for_completion
+
+          finish = '%.2f' % (Time.now - start)
+
+          $redis.hset('vmpooler__clone__' + Date.today.to_s, pool['name'] + ':' + vm['hostname'], finish)
+          $redis.hset('vmpooler__vm__' + vm['hostname'], 'clone_time', finish)
+
+          $logger.log('s', "[+] [#{pool['name']}] '#{vm['hostname']}' cloned from '#{pool['template']}' in #{finish} seconds")
+        rescue
+          $logger.log('s', "[!] [#{pool['name']}] '#{vm['hostname']}' clone appears to have failed")
+          $redis.srem('vmpooler__pending__' + pool['name'], vm['hostname'])
+        end
+      rescue
+        $logger.log('s', "[!] [#{pool['name']}] clone appears to have failed")
+      end
+  end
+
+    def destroy_vm(vm, pool)
+      begin
+        @connection.serviceInstance.CurrentTime
+      rescue
+        initialize
+      end
+
+      host = find_vm(vm) || find_vm_heavy(vm)[vm]
+
+      if
+        (host.runtime) &&
+        (host.runtime.powerState) &&
+        (host.runtime.powerState == 'poweredOn')
+
+        $logger.log('d', "[ ] [#{pool['name']}] '#{vm}' is being shut down")
+        host.PowerOffVM_Task.wait_for_completion
+      end
+
+      host.Destroy_Task.wait_for_completion
     end
 
     def find_datastore(datastorename)
@@ -356,6 +479,23 @@ module Vmpooler
         recursive: true,
         type: ['VirtualMachine']
       )
+    end
+
+    def get_inventory(pool)
+      begin
+        @connection.serviceInstance.CurrentTime
+      rescue
+        initialize
+      end
+
+      inventory = {}
+
+      base = find_folder(pool['folder'])
+      base.childEntity.each do |vm|
+        inventory[instance.instance_id] = 1
+      end
+
+      inventory
     end
 
     def get_snapshot_list(tree, snapshotname)
