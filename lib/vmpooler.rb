@@ -4,7 +4,6 @@ module Vmpooler
   require 'date'
   require 'json'
   require 'open-uri'
-  require 'rbvmomi'
   require 'redis'
   require 'sinatra/base'
   require 'time'
@@ -12,12 +11,16 @@ module Vmpooler
   require 'yaml'
   require 'set'
 
-  %w( api graphite logger pool_manager vsphere_helper statsd dummy_statsd ).each do |lib|
+  def self.load_library(library)
     begin
-      require "vmpooler/#{lib}"
+      require "vmpooler/#{library}"
     rescue LoadError
-      require File.expand_path(File.join(File.dirname(__FILE__), 'vmpooler', lib))
+      require File.expand_path(File.join(File.dirname(__FILE__), 'vmpooler', library))
     end
+  end
+
+  %w( api graphite logger pool_manager statsd dummy_statsd ).each do |lib|
+    load_library(lib)
   end
 
   def self.config(filepath='vmpooler.yaml')
@@ -34,6 +37,12 @@ module Vmpooler
     parsed_config[:config]['vm_checktime'] ||= 15
     parsed_config[:config]['vm_lifetime']  ||= 24
     parsed_config[:config]['prefix']       ||= ''
+
+    # Load provider libraries and helpers
+    if parsed_config[:vsphere]
+      require 'rbvmomi'
+      load_library('vsphere_helper')
+    end
 
     # Create an index of pool aliases
     parsed_config[:pool_names] = Set.new
