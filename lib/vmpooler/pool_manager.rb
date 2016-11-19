@@ -31,8 +31,9 @@ module Vmpooler
 
       if host
         begin
+        hostname = $redis.hget('vmpooler__vm__' + vm, 'hostname') || vm
           Timeout.timeout(5) do
-            TCPSocket.new vm, 22
+            TCPSocket.new hostname, 22
           end
           move_pending_vm_to_ready(vm, pool, host)
         rescue

@@ -74,11 +74,11 @@ module Vmpooler
 
     def update_result_hosts(result, template, vm)
       result[template] ||= {}
-      if result[template]['hostname']
-        result[template]['hostname'] = Array(result[template]['hostname'])
-        result[template]['hostname'].push(vm)
+      if result[template]['vm']
+        result[template]['vm'] = Array(result[template]['vm'])
+        result[template]['vm'].push(vm)
       else
-        result[template]['hostname'] = vm
+        result[template]['vm'] = vm
       end
     end
 
@@ -558,12 +558,13 @@ module Vmpooler
 
         # Look up IP address of the hostname
         begin
-          ipAddress = TCPSocket.gethostbyname(params[:hostname])[3]
+          ipAddress = rdata['ip_address'] || TCPSocket.gethostbyname(rdata['hostname'] || params[:hostname])[3]
         rescue
           ipAddress = ""
         end
 
         result[params[:hostname]]['ip'] = ipAddress
+        result[params[:hostname]]['hostname'] = rdata['hostname'] || params[:hostname]
 
         if config['domain']
           result[params[:hostname]]['domain'] = config['domain']
