@@ -6,6 +6,7 @@ else
   gem 'json', '>= 1.8'
 end
 
+gem 'aws-sdk', '>= 2.6.22'
 gem 'puma', '>= 3.6.0'
 gem 'rack', '>= 1.6'
 gem 'rake', '>= 10.4'

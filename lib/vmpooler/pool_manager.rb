@@ -70,7 +70,7 @@ module Vmpooler
             end
           else
             return
-        end
+          end
       end
 
       clone_time = $redis.hget('vmpooler__vm__' + vm, 'clone')
@@ -369,6 +369,8 @@ module Vmpooler
       $logger.log('d', "[*] [#{pool['name']}] starting worker thread")
 
       case pool['provider']
+        when 'ec2'
+          $provider[pool['name']] ||= Vmpooler::Ec2Helper.new($config, $logger, $redis, $metrics)
         when 'vsphere'
           $provider[pool['name']] ||= Vmpooler::VsphereHelper.new($config, $logger, $redis, $metrics)
       end
