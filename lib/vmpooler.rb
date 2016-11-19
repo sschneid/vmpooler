@@ -39,6 +39,10 @@ module Vmpooler
     parsed_config[:config]['prefix']       ||= ''
 
     # Load provider libraries and helpers
+    if parsed_config[:cloudformation]
+      require 'aws-sdk'
+      load_library('cloudformation_helper')
+    end
     if parsed_config[:ec2]
       require 'aws-sdk'
       load_library('ec2_helper')

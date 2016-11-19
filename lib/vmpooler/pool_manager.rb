@@ -366,11 +366,13 @@ module Vmpooler
     end
 
     def check_pool(pool)
-      $logger.log('d', "[*] [#{pool['name']}] starting worker thread")
+      $logger.log('d', "[*] [#{pool['name']}] (#{pool['provider']}) starting worker thread")
 
       case pool['provider']
         when 'ec2'
           $provider[pool['name']] ||= Vmpooler::Ec2Helper.new($config, $logger, $redis, $metrics)
+        when 'cloudformation'
+          $provider[pool['name']] ||= Vmpooler::CloudFormationHelper.new($config, $logger, $redis, $metrics)
         when 'vsphere'
           $provider[pool['name']] ||= Vmpooler::VsphereHelper.new($config, $logger, $redis, $metrics)
       end
