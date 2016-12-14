@@ -373,6 +373,8 @@ module Vmpooler
           $provider[pool['name']] ||= Vmpooler::Ec2Helper.new($config, $logger, $redis, $metrics)
         when 'cloudformation'
           $provider[pool['name']] ||= Vmpooler::CloudFormationHelper.new($config, $logger, $redis, $metrics)
+        when 'gce'
+          $provider[pool['name']] ||= Vmpooler::GCEHelper.new($config, $logger, $redis, $metrics)
         when 'vsphere'
           $provider[pool['name']] ||= Vmpooler::VsphereHelper.new($config, $logger, $redis, $metrics)
       end

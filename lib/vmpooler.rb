@@ -43,6 +43,10 @@ module Vmpooler
       require 'aws-sdk'
       load_library('cloudformation_helper')
     end
+    if parsed_config[:gce]
+      require 'google/apis/compute_v1'
+      load_library('gce_helper')
+    end
     if parsed_config[:ec2]
       require 'aws-sdk'
       load_library('ec2_helper')

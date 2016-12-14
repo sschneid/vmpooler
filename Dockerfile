@@ -1,4 +1,4 @@
-FROM jruby:1.7-jdk
+FROM jruby:9.1-jdk
 
 RUN mkdir -p /var/lib/vmpooler
 WORKDIR /var/lib/vmpooler

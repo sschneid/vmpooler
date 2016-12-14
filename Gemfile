@@ -7,6 +7,7 @@ else
 end
 
 gem 'aws-sdk', '>= 2.6.22'
+gem 'google-api-client', '>= 0.9.20'
 gem 'puma', '>= 3.6.0'
 gem 'rack', '>= 1.6'
 gem 'rake', '>= 10.4'
