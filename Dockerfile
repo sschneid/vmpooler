@@ -4,7 +4,6 @@ RUN mkdir -p /var/lib/vmpooler
 WORKDIR /var/lib/vmpooler
 
 ADD Gemfile /var/lib/vmpooler
-ADD Gemfile.lock /var/lib/vmpooler
 RUN bundle install --system
 
 RUN ln -s /opt/jruby/bin/jruby /usr/bin/jruby
