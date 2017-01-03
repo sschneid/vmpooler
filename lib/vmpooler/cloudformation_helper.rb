@@ -42,13 +42,26 @@ module Vmpooler
           timeout_in_minutes: pool['timeout'].to_i,
           capabilities: ['CAPABILITY_IAM'],
           disable_rollback: true,
-          parameters: pool['parameters']
+          parameters: pool['parameters'],
+          tags: [{
+            key: 'pool',
+            value: pool['name']
+          }]
         })
 
         @connection.wait_until(
           :stack_create_complete,
           stack_name: stack_name
         )
+
+        stack = @connection.describe_stacks({ stack_name: stack_name }).stacks[0]
+        stack.outputs.each do |output|
+          if output.output_key == 'DnsAddress'
+            $redis.hset('vmpooler__vm__' + stack_name, 'hostname', output.output_value)
+          end
+
+          $redis.hset('vmpooler__vm__' + stack_name, output.output_key, output.output_value)
+        end
 
         finish = '%.2f' % (Time.now - start)
 
@@ -97,8 +110,24 @@ module Vmpooler
         initialize
       end
 
-      # placeholder
-      return true
+      stack = @connection.describe_stacks({ stack_name: vm }).stacks[0]
+
+      if stack
+        return true
+      else
+        return false
+      end
+    end
+
+
+    def find_vm_heavy(vm)
+      begin
+        @connection.describe_account_limits()
+      rescue
+        initialize
+      end
+
+      find_vm(vm)
     end
 
 
@@ -111,7 +140,6 @@ module Vmpooler
 
       inventory = {}
 
-      stacks = @connection.describe_stacks()
       stacks = @connection.list_stacks({
         stack_status_filter: [
           'CREATE_IN_PROGRESS',
@@ -123,7 +151,11 @@ module Vmpooler
 
       stacks.stack_summaries.each do |stack|
         if stack.stack_name.start_with?($config[:config]['prefix'])
-          inventory[stack.stack_name] = 1
+          @connection.describe_stacks({ stack_name: stack.stack_name }).stacks[0].tags.each do |tag|
+            if (tag.key == 'pool') and (tag.value == pool['name'])
+              inventory[stack.stack_name] = 1
+            end
+          end
         end
       end
 
