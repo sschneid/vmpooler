@@ -112,7 +112,12 @@ module Vmpooler
 
       stack = @connection.describe_stacks({ stack_name: vm }).stacks[0]
 
-      if stack
+      if [
+        'CREATE_IN_PROGRESS',
+        'CREATE_COMPLETE',
+        'CREATE_FAILED',
+        'DELETE_FAILED'
+      ].include? stack.stacks[0].stack_status
         return true
       else
         return false

@@ -31,7 +31,7 @@ module Vmpooler
 
       if host
         begin
-        hostname = $redis.hget('vmpooler__vm__' + vm, 'hostname') || vm
+          hostname = $redis.hget('vmpooler__vm__' + vm, 'hostname') || vm
           Timeout.timeout(5) do
             TCPSocket.new hostname, 22
           end
@@ -84,13 +84,13 @@ module Vmpooler
 
     def check_ready_vm(vm, pool, ttl)
       Thread.new do
-        if ttl > 0
-          if (((Time.now - host.runtime.bootTime) / 60).to_s[/^\d+\.\d{1}/].to_f) > ttl
-            $redis.smove('vmpooler__ready__' + pool, 'vmpooler__completed__' + pool, vm)
-
-            $logger.log('d', "[!] [#{pool}] '#{vm}' reached end of TTL after #{ttl} minutes, removed from 'ready' queue")
-          end
-        end
+#        if ttl > 0
+##          if (((Time.now - host.runtime.bootTime) / 60).to_s[/^\d+\.\d{1}/].to_f) > ttl
+#            $redis.smove('vmpooler__ready__' + pool, 'vmpooler__completed__' + pool, vm)
+#
+#            $logger.log('d', "[!] [#{pool}] '#{vm}' reached end of TTL after #{ttl} minutes, removed from 'ready' queue")
+#          end
+#        end
 
         check_stamp = $redis.hget('vmpooler__vm__' + vm, 'check')
 
@@ -125,13 +125,13 @@ module Vmpooler
             end
           else
             $redis.srem('vmpooler__ready__' + pool, vm)
-
-            $logger.log('s', "[!] [#{pool}] '#{vm}' not found in vCenter inventory, removed from 'ready' queue")
+            $logger.log('s', "[!] [#{pool}] '#{vm}' not found in inventory, removed from 'ready' queue")
           end
 
           begin
+            hostname = $redis.hget('vmpooler__vm__' + vm, 'hostname') || vm
             Timeout.timeout(5) do
-              TCPSocket.new vm, 22
+              TCPSocket.new hostname, 22
             end
           rescue
             if $redis.smove('vmpooler__ready__' + pool, 'vmpooler__completed__' + pool, vm)
@@ -426,6 +426,9 @@ module Vmpooler
             check_ready_vm(vm, pool['name'], pool['ready_ttl'] || 0)
           rescue
           end
+        else
+          $redis.srem('vmpooler__ready__' + pool['name'], vm)
+          $logger.log('s', "[!] [#{pool['name']}] '#{vm}' not found in inventory, removed from 'ready' queue")
         end
       end
 
